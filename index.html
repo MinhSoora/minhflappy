@@ -1,9 +1,12 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
+<title>MinhFlappy</title>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<title>MinhFlappy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap" rel="stylesheet">
 <style>
   :root{
     --sky-top:#7ec8f2;
@@ -22,7 +25,7 @@
     margin:0; padding:0; width:100%; height:100%;
     overflow:hidden; overscroll-behavior:none; touch-action:none;
     background:#0e1b2c;
-    font-family: 'Segoe UI', 'Trebuchet MS', system-ui, -apple-system, sans-serif;
+    font-family: "Google Sans Flex", "Google Sans", "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
   }
   #gameWrap{
     position:fixed; inset:0;
@@ -420,8 +423,7 @@
   .bossHpRow .bossLabel{ color:#ff6b6b; font-weight:900; font-size:12px; letter-spacing:1px; text-shadow:0 2px 4px rgba(0,0,0,0.6); white-space:nowrap; }
   .bossHpBarWrap{ flex:1; height:16px; border-radius:999px; background:rgba(0,0,0,0.4); border:2px solid rgba(255,255,255,0.5); overflow:hidden; }
   .bossHpBarFill{ height:100%; width:100%; background:linear-gradient(90deg,#ff5c5c,#c1121f); transform-origin:left center; transition: transform .18s ease; }
-  .bossTimer{ color:#fff; font-weight:900; font-size:20px; text-shadow:0 2px 6px rgba(0,0,0,0.6); font-variant-numeric: tabular-nums; }
-  .bossTimer.warn{ color:#ff5c5c; animation: hintPulse .5s ease-in-out infinite; }
+  .bossTimer{ display: none; }
 
   #gunReticle{
     position:absolute; width:26px; height:26px; z-index:9;
@@ -476,7 +478,7 @@
         <div class="bossLabel">XUÂN NGỌC</div>
         <div class="bossHpBarWrap"><div class="bossHpBarFill" id="bossHpFill"></div></div>
       </div>
-      <div class="bossTimer" id="bossTimer">1:00</div>
+      <div class="bossTimer" id="bossTimer">Điểm: 0/0</div>
     </div>
     <div id="gunReticle"><div class="ring"></div></div>
     <div id="bossBanner">
@@ -752,12 +754,20 @@ const Audio = (function(){
     tone(164,0.5,"sawtooth",0.18,0.12,60);
   }
   function shoot(){ tone(1400,0.05,"square",0.14,0,700); }
-  function bossHit(){ tone(300,0.08,"square",0.18,0,120); }
+  function bossHit(){
+    tone(240, 0.18, "sawtooth", 0.28, 0, 80);
+    tone(440, 0.1, "triangle", 0.20, 0.05);
+  }
   function bossDefeat(){
-    tone(392,0.14,"triangle",0.24,0);
-    tone(523,0.14,"triangle",0.24,0.12);
-    tone(659,0.14,"triangle",0.24,0.24);
-    tone(880,0.3,"triangle",0.28,0.36);
+    // A dramatic rising then falling epic explosion sound!
+    tone(100, 0.45, "sawtooth", 0.35, 0, 50);
+    tone(300, 0.40, "sawtooth", 0.30, 0.1, 40);
+    tone(600, 0.35, "sawtooth", 0.25, 0.2, 30);
+    tone(800, 0.65, "sawtooth", 0.20, 0.3, 20);
+    // Add chime
+    tone(880, 0.2, "sine", 0.3, 0.4);
+    tone(1200, 0.2, "sine", 0.3, 0.5);
+    tone(1500, 0.35, "sine", 0.3, 0.6);
   }
   function bossEscape(){
     tone(300,0.2,"sawtooth",0.2,0,120);
@@ -953,6 +963,20 @@ class Boss{
   }
 }
 
+class BossBullet {
+  constructor(x, y, vx, vy) {
+    this.x = x;
+    this.y = y;
+    this.vx = vx;
+    this.vy = vy;
+    this.radius = 7;
+  }
+  update(dt) {
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+  }
+}
+
 /* =========================================================
    COLLISION MODULE
    ========================================================= */
@@ -974,6 +998,31 @@ const Collision = {
   circleCircle(x1,y1,r1,x2,y2,r2){
     const dx=x1-x2, dy=y1-y2;
     return (dx*dx+dy*dy) < (r1+r2)*(r1+r2);
+  },
+  laser(bird, laser, boss, W, H){
+    if (!laser || laser.phase !== "active") return false;
+    const bx = boss ? boss.x : W * 0.76;
+    const by = boss ? boss.y : H * 0.4;
+    const angles = laser.is3Way
+      ? [Math.PI, Math.PI - 0.28, Math.PI + 0.28]
+      : [Math.PI];
+
+    for (const angle of angles) {
+      const ux = Math.cos(angle);
+      const uy = Math.sin(angle);
+      const vx = bird.x - bx;
+      const vy = bird.y - by;
+      const proj = vx * ux + vy * uy;
+      if (proj > 0) {
+        const cx = bx + proj * ux;
+        const cy = by + proj * uy;
+        const dist = Math.hypot(bird.x - cx, bird.y - cy);
+        if (dist < bird.radius * 0.78 + laser.thickness / 2) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 };
 
@@ -1435,34 +1484,77 @@ const Renderer = (function(){
     ctx.globalAlpha = 1;
   }
 
-  /* Boss laser attack: flashing warning band, then a solid beam sweep */
-  function drawBossLaser(laser){
-    const top = laser.y, thickness = laser.thickness;
-    ctx.save();
-    if(laser.phase === "warn"){
-      const blink = 0.35 + Math.abs(Math.sin(laser.t*22))*0.5;
+  function drawRayLaser(x0, y0, angle, thickness, phase, t) {
+    const L = 1000;
+    const x1 = x0 + Math.cos(angle) * L;
+    const y1 = y0 + Math.sin(angle) * L;
+
+    if (phase === "warn") {
+      const blink = 0.35 + Math.abs(Math.sin(t * 22)) * 0.5;
+      ctx.save();
       ctx.globalAlpha = blink;
-      ctx.fillStyle = "rgba(255,60,60,0.5)";
-      ctx.fillRect(0, top, W, thickness);
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = "rgba(255,255,255,0.9)";
-      ctx.lineWidth = 2;
-      ctx.setLineDash([10,8]);
+      ctx.strokeStyle = "rgba(255, 60, 60, 0.7)";
+      ctx.lineWidth = thickness;
       ctx.beginPath();
-      ctx.moveTo(0, top); ctx.lineTo(W, top);
-      ctx.moveTo(0, top+thickness); ctx.lineTo(W, top+thickness);
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
       ctx.stroke();
-      ctx.setLineDash([]);
+
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([10, 8]);
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      ctx.restore();
     } else {
-      const grad = ctx.createLinearGradient(0, top, 0, top+thickness);
+      ctx.save();
+      const dx = Math.cos(angle + Math.PI / 2) * (thickness / 2);
+      const dy = Math.sin(angle + Math.PI / 2) * (thickness / 2);
+      const grad = ctx.createLinearGradient(x0 - dx, y0 - dy, x0 + dx, y0 + dy);
       grad.addColorStop(0, "rgba(255,255,255,0.9)");
       grad.addColorStop(0.15, "rgba(255,90,60,0.95)");
       grad.addColorStop(0.5, "rgba(255,40,30,0.95)");
       grad.addColorStop(0.85, "rgba(255,90,60,0.95)");
       grad.addColorStop(1, "rgba(255,255,255,0.9)");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, top, W, thickness);
+
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = thickness;
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+      ctx.restore();
     }
+  }
+
+  /* Boss laser attack: flashing warning band, then a solid beam sweep */
+  function drawBossLaser(laser, boss){
+    const bx = boss ? boss.x : W * 0.76;
+    const by = boss ? boss.y : H * 0.4;
+    if(laser.is3Way){
+      drawRayLaser(bx, by, Math.PI, laser.thickness, laser.phase, laser.t);
+      drawRayLaser(bx, by, Math.PI - 0.28, laser.thickness, laser.phase, laser.t);
+      drawRayLaser(bx, by, Math.PI + 0.28, laser.thickness, laser.phase, laser.t);
+    } else {
+      drawRayLaser(bx, by, Math.PI, laser.thickness, laser.phase, laser.t);
+    }
+  }
+
+  function drawBossBullet(bullet) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(bullet.x, bullet.y, bullet.radius, 0, Math.PI * 2);
+    const grad = ctx.createRadialGradient(bullet.x, bullet.y, 2, bullet.x, bullet.y, bullet.radius);
+    grad.addColorStop(0, "#fff");
+    grad.addColorStop(0.3, "#ff9f43");
+    grad.addColorStop(1, "#ff3838");
+    ctx.fillStyle = grad;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = "#ff3838";
+    ctx.fill();
     ctx.restore();
   }
 
@@ -1478,7 +1570,8 @@ const Renderer = (function(){
     state.pipes.forEach(drawPipe);
     drawGround();
     if(state.boss) drawBoss(state.boss);
-    if(state.bossLaser) drawBossLaser(state.bossLaser);
+    if(state.bossLaser) drawBossLaser(state.bossLaser, state.boss);
+    if(state.bossBullets) state.bossBullets.forEach(drawBossBullet);
     state.particles.forEach(drawParticle);
     if(state.bird) drawBird(state.bird, !!state.hasGun);
 
@@ -1513,10 +1606,14 @@ const Game = (function(){
   // --- Boss fight: "Xuân Ngọc" ---
   const BOSS_SCORE_TRIGGER = 5;
   const BOSS_SCORE_TRIGGER_2 = 15; // boss returns, stronger
-  const BOSS_MAX_HP = 6;
-  const BOSS_MAX_HP_2 = 12;
-  const BOSS_FIGHT_DURATION = 60; // seconds
-  const BOSS_FIGHT_DURATION_2 = 55; // seconds — a bit tighter the second time
+  const BOSS_MAX_HP = 8;
+  const BOSS_MAX_HP_2 = 14;
+  const BOSS_FIGHT_TARGET_SCORE_1 = 10;
+  const BOSS_FIGHT_TARGET_SCORE_2 = 25;
+
+  function getBossTargetScore(){
+    return bossPhase >= 2 ? BOSS_FIGHT_TARGET_SCORE_2 : BOSS_FIGHT_TARGET_SCORE_1;
+  }
   const BOSS_DIALOGUE_LINES = [
     "Đến lúc hủy diệt mày...",
     "Cầm lấy vũ khí này. Chiến đấu đi!"
@@ -1526,6 +1623,14 @@ const Game = (function(){
     "Lần trước tao còn nương tay. Lần này thì đừng hòng!",
     "Cầm lấy súng đi. Xem mày trụ được bao lâu!"
   ];
+  const BOSS_OUTRO_LINES = [
+    "Hừ... Lần này ngươi gặp may thôi!",
+    "Ta sẽ rút lui để củng cố lực lượng. Hãy đợi đấy, ta sẽ quay lại ở mốc 15 điểm!"
+  ];
+  const BOSS_OUTRO_LINES_2 = [
+    "Không thể nào... Ta lại thất bại dưới tay một chú vịt sao?!",
+    "Ngươi đã thắng trận này... Nhưng ta sẽ quay trở lại phục thù!"
+  ];
   let bossState = "none";     // none | fight | resolved
   let bossTriggered = false;  // phase 1, only once per run
   let bossTriggered2 = false; // phase 2 (score 15), only once per run
@@ -1534,11 +1639,13 @@ const Game = (function(){
   let pendingBossPhase = 1;
   let bossTutorialShown = false; // popup shown once per run, at the first boss encounter
   let boss = null;
-  let bossTimeLeft = 0;
+  let bossDialogueIsOutro = false;
   let bossDialogueIndex = 0;
   let playerHasGun = false;
   let bossLaserTimer = 0;     // countdown to the next telegraphed laser attack
   let bossLaser = null;       // {y, thickness, phase:"warn"|"active", t, warnDur, activeDur}
+  let bossBullets = [];
+  let bossBulletTimer = 0;
 
   // --- Story intro & win cutscene ("bay về nhà bạn gái") ---
   const STORY_LINES = [
@@ -1575,11 +1682,12 @@ const Game = (function(){
     pendingBossPhase = 1;
     bossTutorialShown = false;
     boss = null;
-    bossTimeLeft = 0;
     bossDialogueIndex = 0;
     playerHasGun = false;
     bossLaserTimer = 0;
     bossLaser = null;
+    bossBullets = [];
+    bossBulletTimer = 0;
     winTriggered = false;
     pendingWinCutscene = false;
     Renderer.setBossMode(false);
@@ -1595,6 +1703,7 @@ const Game = (function(){
     boss = null;
     playerHasGun = false;
     bossLaser = null;
+    bossBullets = [];
     UI.showBossHud(false);
     UI.showGunReticle(false);
     UI.hideBossDialogue();
@@ -1632,13 +1741,33 @@ const Game = (function(){
     UI.setScore(score);
     UI.bumpScore();
     checkMilestones();
+    if(bossState === "fight" && boss){
+      const triggerScore = bossPhase >= 2 ? BOSS_SCORE_TRIGGER_2 : BOSS_SCORE_TRIGGER;
+      const targetScore = getBossTargetScore();
+      const fraction = Math.max(0, Math.min(1, (targetScore - score) / (targetScore - triggerScore)));
+      UI.updateBossHp(fraction);
+
+      if(score >= targetScore){
+        boss.hit();
+        spawnBurst(boss.x, boss.y, "#ffd23f", 20);
+        winBossFight();
+      } else {
+        Audio.bossHit();
+        boss.hit();
+        spawnBurst(boss.x, boss.y, "#ff5c5c", 10);
+      }
+    }
   }
 
   function checkMilestones(){
     Achievements.MILESTONES.forEach(m=>{
       if(score >= m && !achievedMilestones.has(m)){
         achievedMilestones.add(m);
-        Achievements.fireScore(m);
+        if(bossState === "fight" && m === getBossTargetScore()){
+          // Delay firing milestone achievement toast until boss dialogue finishes
+        } else {
+          Achievements.fireScore(m);
+        }
         if(m === BOSS_SCORE_TRIGGER && !bossTriggered && bossState === "none"){
           bossTriggered = true;
           pendingBossIntro = true;
@@ -1662,6 +1791,7 @@ const Game = (function(){
   /* ----- Boss fight sequence ----- */
   function startBossIntro(){
     state = "bossdialogue";
+    bossDialogueIsOutro = false;
     bossPhase = pendingBossPhase;
     bossDialogueIndex = 0;
     Renderer.setBossMode(true);
@@ -1671,14 +1801,27 @@ const Game = (function(){
     UI.showBossDialogue(lines[0]);
   }
 
+  function startBossOutro(){
+    state = "bossdialogue";
+    bossDialogueIsOutro = true;
+    bossDialogueIndex = 0;
+    const lines = bossPhase >= 2 ? BOSS_OUTRO_LINES_2 : BOSS_OUTRO_LINES;
+    UI.showBossDialogue(lines[0]);
+  }
+
   function advanceBossDialogue(){
-    const lines = bossPhase >= 2 ? BOSS_DIALOGUE_LINES_2 : BOSS_DIALOGUE_LINES;
+    const lines = bossDialogueIsOutro
+      ? (bossPhase >= 2 ? BOSS_OUTRO_LINES_2 : BOSS_OUTRO_LINES)
+      : (bossPhase >= 2 ? BOSS_DIALOGUE_LINES_2 : BOSS_DIALOGUE_LINES);
     bossDialogueIndex++;
     if(bossDialogueIndex < lines.length){
       UI.showBossDialogue(lines[bossDialogueIndex]);
     } else {
       UI.hideBossDialogue();
-      if(bossPhase === 1 && !bossTutorialShown){
+      if(bossDialogueIsOutro){
+        bossDialogueIsOutro = false;
+        resolveBossFight();
+      } else if(bossPhase === 1 && !bossTutorialShown){
         bossTutorialShown = true;
         state = "bosstutorial";
         UI.showScreen("bossTutorialScreen");
@@ -1697,28 +1840,32 @@ const Game = (function(){
   function startBossFight(){
     state = "playing";
     bossState = "fight";
-    playerHasGun = true;
+    playerHasGun = false;
     // teleport the player to the center of the arena for a fair start
     bird.x = Renderer.W*0.5;
     bird.y = Renderer.H*0.5;
     bird.vy = 0;
     bird.trail = [];
     const maxHp = bossPhase >= 2 ? BOSS_MAX_HP_2 : BOSS_MAX_HP;
-    const duration = bossPhase >= 2 ? BOSS_FIGHT_DURATION_2 : BOSS_FIGHT_DURATION;
     boss = new Boss(Renderer.W*0.76, Renderer.H*0.4, maxHp, bossPhase);
-    bossTimeLeft = duration;
     bossLaserTimer = bossPhase >= 2 ? (0.9 + Math.random()*0.6) : (1.4 + Math.random()*1.0);
     bossLaser = null;
+    bossBullets = [];
+    bossBulletTimer = bossPhase >= 2 ? 1.0 : 0;
     pipes = []; // clear the field for a fair start
     spawnTimer = 0;
     UI.showBossHud(true);
     UI.updateBossHp(1);
-    UI.updateBossTimer(bossTimeLeft);
-    UI.showGunReticle(true);
+    UI.updateBossTimer(score, getBossTargetScore());
+    UI.showGunReticle(false);
     lastTime = performance.now();
   }
 
   function winBossFight(){
+    startBossOutro();
+  }
+
+  function resolveBossFight(){
     bossState = "resolved";
     playerHasGun = false;
     spawnBurst(boss.x, boss.y, "#ffd23f", 26);
@@ -1733,14 +1880,29 @@ const Game = (function(){
     Audio.setBossMusicMode(false);
     if(bossPhase >= 2){
       UI.showBossBanner("🏆 HẠ GỤC XUÂN NGỌC LẦN 2!", "Chiến thắng tuyệt đối!");
-      Achievements.fireSpecial("bossWin2");
+      setTimeout(()=>{
+        Achievements.fireSpecial("bossWin2");
+        if (score >= BOSS_FIGHT_TARGET_SCORE_2) {
+          setTimeout(()=>{
+            Achievements.fireScore(BOSS_FIGHT_TARGET_SCORE_2);
+          }, 1600);
+        }
+      }, 2200);
     } else {
       UI.showBossBanner("🏆 ĐÃ HẠ GỤC XUÂN NGỌC!", "Chiến thắng!");
-      Achievements.fireSpecial("bossWin");
+      setTimeout(()=>{
+        Achievements.fireSpecial("bossWin");
+        if (score >= BOSS_FIGHT_TARGET_SCORE_1) {
+          setTimeout(()=>{
+            Achievements.fireScore(BOSS_FIGHT_TARGET_SCORE_1);
+          }, 1600);
+        }
+      }, 2200);
     }
     spawnGraceTimer = 1.2;
     spawnTimer = 0;
     bossState = "none";
+    state = "playing";
   }
 
   function loseBossFight(){
@@ -1798,7 +1960,7 @@ const Game = (function(){
         const margin = 60;
         const thickness = isP2 ? 96 : 78;
         const y = margin + Math.random()*Math.max(1, gy - margin*2 - thickness);
-        bossLaser = { y, thickness, phase:"warn", t:0, warnDur: isP2 ? 0.6 : 0.85, activeDur: isP2 ? 0.38 : 0.3 };
+        bossLaser = { y, thickness, phase:"warn", t:0, warnDur: isP2 ? 0.6 : 0.85, activeDur: isP2 ? 0.38 : 0.3, is3Way: isP2 };
         Audio.laserWarn();
       }
       return;
@@ -1821,21 +1983,6 @@ const Game = (function(){
       return;
     }
     if(state === "playing"){
-      // shooting: tapping near the boss during the fight also fires a shot
-      if(bossState === "fight" && boss && pt){
-        const d = Math.hypot(pt.x - boss.x, pt.y - boss.y);
-        if(d < boss.radius*1.3){
-          boss.hit();
-          Audio.shoot();
-          Audio.bossHit();
-          spawnBurst(boss.x, boss.y, "#ff5c5c", 10);
-          Renderer.triggerShake(5);
-          UI.updateBossHp(boss.hp/boss.maxHp);
-          if(boss.hp <= 0){
-            winBossFight();
-          }
-        }
-      }
       bird.flap();
       Audio.flap();
       spawnBurst(bird.x-8, bird.y+6, "rgba(255,255,255,0.8)", 4);
@@ -1922,12 +2069,35 @@ const Game = (function(){
 
     if(bossState === "fight" && boss){
       boss.update(dt, Renderer.W, Renderer.H);
-      bossTimeLeft -= dt;
-      UI.updateBossTimer(bossTimeLeft);
       UI.positionGunReticle(boss.x, boss.y);
       updateBossLaser(dt, gy);
-      if(bossTimeLeft <= 0){
-        loseBossFight();
+
+      if (bossPhase >= 2) {
+        bossBulletTimer -= dt;
+        if (bossBulletTimer <= 0) {
+          const numBullets = 9;
+          const spread = 0.9;
+          const startAngle = Math.PI - spread / 2;
+          const angleStep = spread / (numBullets - 1);
+          const bulletSpeed = 190;
+          Audio.click();
+          for (let i = 0; i < numBullets; i++) {
+            const angle = startAngle + i * angleStep;
+            const vx = Math.cos(angle) * bulletSpeed;
+            const vy = Math.sin(angle) * bulletSpeed;
+            bossBullets.push(new BossBullet(boss.x, boss.y, vx, vy));
+          }
+          bossBulletTimer = 1.8 + Math.random() * 1.0;
+        }
+      }
+    }
+
+    if (bossState === "fight") {
+      for (let i = bossBullets.length - 1; i >= 0; i--) {
+        bossBullets[i].update(dt);
+        if (bossBullets[i].x < -50 || bossBullets[i].y < -50 || bossBullets[i].y > Renderer.H + 50) {
+          bossBullets.splice(i, 1);
+        }
       }
     }
 
@@ -1984,9 +2154,12 @@ const Game = (function(){
         endGame();
         return;
       }
-      if(bossLaser && bossLaser.phase === "active"){
-        const top = bossLaser.y, bot = bossLaser.y + bossLaser.thickness;
-        if(bird.y + bird.radius*0.8 > top && bird.y - bird.radius*0.8 < bot){
+      if(Collision.laser(bird, bossLaser, boss, Renderer.W, Renderer.H)){
+        endGame();
+        return;
+      }
+      for (const b of bossBullets) {
+        if (Collision.circleCircle(bird.x, bird.y, bird.radius * 0.76, b.x, b.y, b.radius)) {
           endGame();
           return;
         }
@@ -2025,6 +2198,7 @@ const Game = (function(){
       pipes: pipes||[], particles: particles||[],
       boss: (bossState==="fight") ? boss : null,
       bossLaser: (bossState==="fight") ? bossLaser : null,
+      bossBullets: (bossState==="fight") ? bossBullets : [],
       hasGun: playerHasGun
     });
     if(state === "menu"){
@@ -2354,11 +2528,9 @@ const UI = (function(){
   function updateBossHp(fraction){
     bossHpFill.style.transform = `scaleX(${Math.max(0,Math.min(1,fraction))})`;
   }
-  function updateBossTimer(secLeft){
-    const s = Math.max(0, Math.ceil(secLeft));
-    const m = Math.floor(s/60), r = s%60;
-    bossTimerEl.textContent = m + ":" + String(r).padStart(2,"0");
-    bossTimerEl.classList.toggle("warn", s <= 10);
+  function updateBossTimer(score, targetScore){
+    bossTimerEl.textContent = "Điểm: " + score + "/" + targetScore;
+    bossTimerEl.classList.remove("warn");
   }
   function showGunReticle(show){ gunReticle.classList.toggle("show", !!show); }
   function positionGunReticle(x,y){
